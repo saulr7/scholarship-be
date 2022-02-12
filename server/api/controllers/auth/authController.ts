@@ -1,16 +1,16 @@
-import {Request, Response} from "express"
+import { Request, Response } from "express"
 import UserModel from "../../../../shared/models/UserModel"
-import {body} from "express-validator"
+import { body } from "express-validator"
 import UserService from "../../services/userService"
 import PasswordService from "../../services/passwordService"
-import jwt from "jsonwebtoken"
+import JWTService from "../../services/jwtService"
 
-const secret = process.env.JWT_SECRET
 
 export class AuthController {
 	async register(req: Request, res: Response, next: any) {
 		try {
-			let newUser: UserModel = {...req.body}
+			let newUser: UserModel = { ...req.body }
+
 			let passService = new PasswordService()
 
 			newUser.userPassword = await passService.generatePasswordHash(newUser.userPassword)
@@ -33,26 +33,13 @@ export class AuthController {
 			if (!user) {
 				res.status(400).json("Invalid Email or password").end()
 			} else if (await new PasswordService().validatePassword(password, user.userPassword)) {
-				//JWT only contains the user ID
-				const payload = {
-					id: user.id,
-					email: user.emailAddress,
-					password: req.body.userPassword
-				}
+
+				const token = await new JWTService().sign(user.id)
 				//login lasts 100 hours
-				jwt.sign(payload, secret, {expiresIn: 360000}, (err, token) => {
-					if (err)
-						res.status(500)
-							.json({
-								error: "Error signing token",
-								raw: err
-							})
-							.end()
-					res.status(200).json({
-						success: true,
-						token: `Bearer ${token}`
-					})
-				})
+				// jwt.sign(payload, secret, { expiresIn }, (err, token) => {
+				// 	if (err) { res.status(500).json({ error: "Error signing token", raw: err }).end() }
+				// })
+				res.status(200).json({ success: true, token: `Bearer ${token}` })
 			} else {
 				res.status(400).json("Invalid Email or password").end()
 			}
@@ -72,20 +59,22 @@ export class AuthController {
 						return Promise.reject("Email address already in use")
 					}
 				}),
-			body("userPassword", "Minimum password lenght is 6 characters").isString().isLength({min: 6})
+			body("userPassword", "Minimum password lenght is 6 characters").isString().isLength({ min: 6 }),
+			body("userName").notEmpty().withMessage("Invalid email userName")
 		]
 		return validations
 	}
 
 	validateLogin() {
 		var validations = [
-			body("email").isEmail().withMessage("Invalid email address"),
-			body("password", "Invalid password").isString().bail().isLength({min: 6}),
-			body().custom(async (value, {req}) => {
+			body("emailAddress").isEmail().withMessage("Invalid email address"),
+			body("userPassword", "Invalid password").isString().bail().isLength({ min: 6 }),
+			body().custom(async (value, { req }) => {
 				const email = req.body.emailAddress
-				const password = req.body.password
+				const password = req.body.userPassword
 				let user = await new UserService().getByEmail(email)
-				if (!user || (await new PasswordService().validatePassword(password, user.userPassword))) {
+				const validaPassword = await new PasswordService().validatePassword(password, user.userPassword)
+				if (!user || !validaPassword) {
 					return Promise.reject("The email or password you entered is incorrect.")
 				}
 			})
